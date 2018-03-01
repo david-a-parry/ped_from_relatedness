@@ -155,9 +155,13 @@ def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
             row.append(str(genders[g]))
             row.append('-9') #affectation status unknown
             if g in children:
-                row.append("{:.3f}".format(get_score(children[g]['father'], g, scores)))
-                row.append("{:.3f}".format(get_score(children[g]['mother'], g, scores)))
-                row.append("{:.3f}".format(get_score(children[g]['father'], children[g]['mother'], scores)))
+                row.append("{:.3f}".format(get_score(children[g]['father'], g, 
+                                                     scores)))
+                row.append("{:.3f}".format(get_score(children[g]['mother'], g, 
+                                                     scores)))
+                row.append("{:.3f}".format(get_score(children[g]['father'], 
+                                                     children[g]['mother'], 
+                                                     scores)))
             else:
                 row.extend(['NA', 'NA', 'NA'])
             row.append("{:.3f}".format(x_ratios[g]))
