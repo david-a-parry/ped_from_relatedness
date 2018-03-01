@@ -3,6 +3,7 @@
 import sys
 import argparse
 from parse_vcf import VcfReader, VcfHeader, VcfRecord 
+from vase.ped_file import Family, Individual
 from collections import defaultdict
 
 par = {'hg38':   (('chrX', 10001, 2781479), ('chrX', 155701383, 156030895),
@@ -22,16 +23,19 @@ gender_cutoff = 0.3 #min ratio of het to hom vars to consider a sample XX
 
 def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38', 
          min_gq=20, family_cutoff=None, first_degree_cutoff=None, 
-         xx_cutoff=None):
+         xx_cutoff=None, dup_cutoff=None, max_x_vars=None, pass_filters=False):
     global gender_cutoff
     cutoffs = dict()
     #cutoffs['par'] = 0.225 if relatedness2 else 0.35
     cutoffs['1st'] = 0.2 if relatedness2 else 0.35
     cutoffs['rel'] = 0.08 if relatedness2 else 0.125
+    cutoffs['dup'] = 0.45 if relatedness2 else 0.8
     if family_cutoff:
         cutoffs['rel'] = family_cutoff
     if first_degree_cutoff:
         cutoffs['1st'] = first_degree_cutoff
+    if dup_cutoff:
+        cutoffs['dup'] = dup_cutoff
     if xx_cutoff:
         gender_cutoff = xx_cutoff
     scores = defaultdict(dict)
@@ -41,11 +45,27 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
                 continue 
             cols = line.rstrip().split()
             scores[cols[0]][cols[1]] = float(cols[-1])
-    genders,x_het_ratio = infer_gender(vcf, assembly, min_gq)
+    warn_of_duplicate_samples(scores, cutoffs)
+    genders,x_het_ratio = infer_gender(vcf, assembly, scores, min_gq, 
+                          max_x_vars=max_x_vars, pass_filters=pass_filters)
     if ped:
         check_ped(scores, genders, x_het_ratios, ped, cutoffs)
     else:
         construct_families(scores, genders, x_het_ratio, cutoffs)
+
+def warn_of_duplicate_samples(scores, cutoffs):
+    dups = set()
+    for i1 in scores:
+        for i2 in scores[i1]:
+            if i1 == i2:
+                continue
+            if scores[i1][i2] >= cutoffs['dup']:
+                dups.add(str.join(" + ", sorted((i1, i2))) + " ({})"
+                         .format(scores[i1][i2]))
+    if dups:
+        sys.stderr.write("WARNING: Identified {:,} ".format(len(dups)) + 
+                         "potential duplicate samples as follows:\n\t" + 
+                         str.join("\n\t", sorted(dups)) + "\n")
 
 def construct_families(scores, genders, x_het_ratios, cutoffs):
     fams = assign_fams(scores, cutoffs)
@@ -60,23 +80,42 @@ def construct_families(scores, genders, x_het_ratios, cutoffs):
         for r in rows:
             print(str.join("\t", ["Fam_{}".format(f)] + r))
 
-def infer_gender(f, assembly, min_gq):
+def infer_gender(f, assembly, scores, min_gq, max_x_vars=None, 
+                 pass_filters=False):
+    sys.stderr.write("Parsing VCF '{}' to infer sample genders.\n".format(f))
     vcf = VcfReader(f)
+    check_samples_in_vcf(vcf, scores)
     vcf.set_region(non_par[assembly][0], non_par[assembly][1], 
                    non_par[assembly][2])
     het_counts = defaultdict(int)
     total_counts = defaultdict(int)#total variant (i.e. non 0/0) sites
+    n = 0
+    v = 0
+    sys.stderr.write("Parsing variants in non-PAR coorinates ({}:{}-{})\n"
+                     .format(non_par[assembly][0], non_par[assembly][1],
+                             non_par[assembly][2]))
     for record in vcf.parser:
+        n += 1
+        if pass_filters and record.FILTER != 'PASS':
+            continue
+        if max_x_vars and v >= max_x_vars:
+            break
+        elif n % 1000 == 0:
+            sys.stderr.write("\rRead {:,} variants on chrX {:,}".format(n,v) + 
+                            " valid variants for inferring gender.")
+        valid_gt = False
         gts = record.parsed_gts(fields=['GT', 'GQ'])
         for samp in gts['GT']:
             if gts['GQ'][samp] is None or gts['GQ'][samp] < min_gq:
                 continue
+            valid_gt = True
             alleles = set(gts['GT'][samp])
             if len(alleles) > 1:
                 het_counts[samp] += 1
                 total_counts[samp] += 1
             elif 0 not in alleles:
                 total_counts[samp] += 1
+        v += valid_gt
     if not total_counts:
         raise RuntimeError("No qualifying variants identified in non PAR " + 
                            "region {}:{}-{}.".format(non_par[assembly][0], 
@@ -95,7 +134,21 @@ def infer_gender(f, assembly, min_gq):
                 genders[samp] = 2
             else:
                 genders[samp] = 1
+    sys.stderr.write("\nFinished parsing variants\n")
     return (genders, ratios)
+
+def check_samples_in_vcf(vcf, scores): 
+    sys.stderr.write("Checking samples...\n")
+    for indv1, other in scores.items():
+        if indv1 not in vcf.header.samples:
+            raise RuntimeError("ERROR: Could not find individual '{}' "
+                               .format(indv1) + "from relatedness file in VCF")
+        for indv2 in other:
+            if indv2 not in vcf.header.samples:
+                raise RuntimeError("ERROR: Could not find individual '{}' "
+                                   .format(indv2) + "from relatedness file " + 
+                                   "in VCF")
+    sys.stderr.write("All samples from relatedness file found in VCF.\n")
 
 def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
     # everyone in each group should be first-degree relative of at least one
@@ -312,10 +365,19 @@ def get_parser():
                         help='''Custom relatedness value cutoff to consider two 
                                 samples related. Depending on the type of data
                                 used (e.g. WES vs WGS) you may need to tune
-                                this threshold to find a sensible value.''')
+                                this threshold to find a sensible value. 
+                                Default value is 0.125 or 0.08 if 
+                                --relatedness2 flag is set.''')
     parser.add_argument('-1', '--first_degree_cutoff', type=float, 
                         help='''Custom relatedness value cutoff to consider two 
-                                samples first degree relatives.''')
+                                samples first degree relatives. Default value 
+                                is 0.35 or 0.2 if --relatedness2 flag is 
+                                set.''')
+    parser.add_argument('-d', '--dup_cutoff', type=float, 
+                        help='''Custom relatedness value cutoff to consider two 
+                                samples as potential duplicates. Default value 
+                                is 0.8 or 0.45 if --relatedness2 flag is 
+                                set.''')
     parser.add_argument('-x', '--xx_cutoff', type=float, 
                         help='''Custom cutoff of for ratio het variants to 
                                 total variants for assigning a sample as XX 
@@ -328,6 +390,17 @@ def get_parser():
                         help='''Minimum genotype quality. Genotype calls with a
                                 GQ below this value will be ignored. 
                                 Default=20.''')
+    parser.add_argument('-n', '--max_x_vars', type=int, 
+                        help='''Maximum number of variants from the X 
+                                chromosome to test when checking genders.
+                                Default behaviour is to check all variants in 
+                                the non-pseudoautosomal region. Use this option
+                                if your VCF is large and checking X chromosome
+                                variants takes a longer than desired.''')
+    parser.add_argument('--pass_filters', action='store_true',
+                        help='''Only use variants with 'PASS' in the filter
+                                field for inferring gender.''')
+            
     return parser
 
 if __name__ == '__main__':
