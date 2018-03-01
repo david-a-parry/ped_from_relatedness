@@ -6,17 +6,17 @@ from parse_vcf import VcfReader, VcfHeader, VcfRecord
 from vase.ped_file import Family, Individual
 from collections import defaultdict
 
-par = {'hg38':   (('chrX', 10001, 2781479), ('chrX', 155701383, 156030895),
+par = {'hg38'  : (('chrX', 10001, 2781479), ('chrX', 155701383, 156030895),
                  ('chrY', 10001, 2781479), ('chrY', 56887903, 57217415)),
        'GRCh38': (('X', 10001, 2781479), ('X', 155701383, 156030895),
                   ('Y', 10001, 2781479), ('Y', 56887903, 57217415)),
-       'hg19':   (('chrX', 60001, 2699520), ('chrX', 154931044, 155260560),
+       'hg19'  : (('chrX', 60001, 2699520), ('chrX', 154931044, 155260560),
                   ('chrY', 10001,   2649520), ('chrY', 59034050, 59363566)),
        'GRCh37': (('X', 60001, 2699520), ('X', 154931044, 155260560),
                   ('Y', 10001,   2649520), ('Y', 59034050, 59363566))}
-non_par = {'hg38':   ('chrX', 2781479, 155701382), 
+non_par = {'hg38'  : ('chrX', 2781479, 155701382), 
            'GRCh38': ('X', 2781479, 155701382), 
-           'hg19':   ('chrX', 2699520, 154931043), 
+           'hg19'  : ('chrX', 2699520, 154931043), 
            'GRCh37': ('X', 2699520, 154931043)}
 
 gender_cutoff = 0.3 #min ratio of het to hom vars to consider a sample XX
@@ -122,19 +122,26 @@ def infer_gender(f, assembly, scores, min_gq, max_x_vars=None,
                                                      non_par[assembly][1],
                                                      non_par[assembly][2]) + 
                            " Have you specified the correct assembly?")
+    sys.stderr.write("\nGot {:,} valid variants on chrX for ".format(v) + 
+                    "gender inference.\n")
     genders = dict()
     ratios = dict()
+    (males, females, unknown) = (0, 0, 0)
     for samp in total_counts:
         if total_counts[samp] < 1:
             genders[samp] = 0
             ratios[samp] = 0.0
+            unknown += 1
         else:
             ratios[samp] = het_counts[samp]/total_counts[samp]
             if ratios[samp] > gender_cutoff: #female
                 genders[samp] = 2
+                females += 1
             else:
                 genders[samp] = 1
-    sys.stderr.write("\nFinished parsing variants\n")
+                males += 1
+    sys.stderr.write("Finished parsing variants - {:,} male, {:,} female {:,}"
+                     .format(males, females, unknown) + " unknown.\n")
     return (genders, ratios)
 
 def check_samples_in_vcf(vcf, scores): 
@@ -322,11 +329,30 @@ def assign_fams(scores, cutoffs):
                     indv_to_fam[indv1] = n
                     indv_to_fam[indv2] = n
                     fams[n].extend([indv1, indv2])
+    #mop up any singletons
+    for indv1 in scores:
+        if indv1 not in indv_to_fam:
+            n += 1
+            indv_to_fam[indv1] = n
+            fams[n] = [indv1]
+        for indv2 in scores[indv1]:
+            if indv2 not in indv_to_fam:
+                n += 1
+                indv_to_fam[indv2] = n
+                fams[n] = [indv2]
     return fams
     
 
 def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
+    ped = PedFile(pedfile)
     raise NotImplementedError
+    #output each line of ped file with extra column indicating errors/warnings
+    # check expected relatedness for all family members
+    # check gender for all samples
+    #TODO
+    #output each undocumented familial relationship
+    #TODO
+
 
 def get_score(indv1, indv2, scores):
     if indv1 in scores and indv2 in scores[indv1]: 
