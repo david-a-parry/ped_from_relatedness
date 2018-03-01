@@ -3,7 +3,7 @@
 import sys
 import argparse
 from parse_vcf import VcfReader, VcfHeader, VcfRecord 
-from vase.ped_file import Family, Individual
+from vase.ped_file import PedFile, Family, Individual
 from collections import defaultdict
 
 par = {'hg38'  : (('chrX', 10001, 2781479), ('chrX', 155701383, 156030895),
@@ -44,12 +44,16 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
             if line.startswith("INDV1"):
                 continue 
             cols = line.rstrip().split()
+            if cols[0] == cols[1]:
+                continue
             scores[cols[0]][cols[1]] = float(cols[-1])
+            scores[cols[1]][cols[0]] = float(cols[-1])
+    scores = dict(scores) #raise KeyErrors for non-existing keys from now on
     warn_of_duplicate_samples(scores, cutoffs)
     genders,x_het_ratio = infer_gender(vcf, assembly, scores, min_gq, 
                           max_x_vars=max_x_vars, pass_filters=pass_filters)
     if ped:
-        check_ped(scores, genders, x_het_ratios, ped, cutoffs)
+        check_ped(scores, genders, x_het_ratio, ped, cutoffs)
     else:
         construct_families(scores, genders, x_het_ratio, cutoffs)
 
@@ -79,6 +83,8 @@ def construct_families(scores, genders, x_het_ratios, cutoffs):
                                     x_het_ratios, cutoffs)
         for r in rows:
             print(str.join("\t", ["Fam_{}".format(f)] + r))
+    sys.stderr.write("Finished analysis. {:,} family groups defined.\n"
+                     .format(len(fams)))
 
 def infer_gender(f, assembly, scores, min_gq, max_x_vars=None, 
                  pass_filters=False):
@@ -101,8 +107,9 @@ def infer_gender(f, assembly, scores, min_gq, max_x_vars=None,
         if max_x_vars and v >= max_x_vars:
             break
         elif n % 1000 == 0:
-            sys.stderr.write("\rRead {:,} variants on chrX {:,}".format(n,v) + 
-                            " valid variants for inferring gender.")
+            sys.stderr.write("\rRead {:,} variants on chrX, found {:,}"
+                             .format(n,v) + " valid variants for gender " +
+                             "inferrence.")
         valid_gt = False
         gts = record.parsed_gts(fields=['GT', 'GQ'])
         for samp in gts['GT']:
@@ -116,14 +123,14 @@ def infer_gender(f, assembly, scores, min_gq, max_x_vars=None,
             elif 0 not in alleles:
                 total_counts[samp] += 1
         v += valid_gt
+    sys.stderr.write("\rFinished reading {:,} variants on chrX, found {:,}"
+                     .format(n,v) + " valid variants for gender inference.\n")
     if not total_counts:
         raise RuntimeError("No qualifying variants identified in non PAR " + 
                            "region {}:{}-{}.".format(non_par[assembly][0], 
                                                      non_par[assembly][1],
                                                      non_par[assembly][2]) + 
                            " Have you specified the correct assembly?")
-    sys.stderr.write("\nGot {:,} valid variants on chrX for ".format(v) + 
-                    "gender inference.\n")
     genders = dict()
     ratios = dict()
     (males, females, unknown) = (0, 0, 0)
@@ -140,21 +147,16 @@ def infer_gender(f, assembly, scores, min_gq, max_x_vars=None,
             else:
                 genders[samp] = 1
                 males += 1
-    sys.stderr.write("Finished parsing variants - {:,} male, {:,} female {:,}"
+    sys.stderr.write("Finished gender inferrence - {:,} male, {:,} female {:,}"
                      .format(males, females, unknown) + " unknown.\n")
     return (genders, ratios)
 
 def check_samples_in_vcf(vcf, scores): 
     sys.stderr.write("Checking samples...\n")
-    for indv1, other in scores.items():
-        if indv1 not in vcf.header.samples:
+    for indv in scores:
+        if indv not in vcf.header.samples:
             raise RuntimeError("ERROR: Could not find individual '{}' "
                                .format(indv1) + "from relatedness file in VCF")
-        for indv2 in other:
-            if indv2 not in vcf.header.samples:
-                raise RuntimeError("ERROR: Could not find individual '{}' "
-                                   .format(indv2) + "from relatedness file " + 
-                                   "in VCF")
     sys.stderr.write("All samples from relatedness file found in VCF.\n")
 
 def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
@@ -168,7 +170,7 @@ def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
     for grp in groups:
         for i in range(0, len(grp)):
             for j in range(i+1, len(grp)):
-                rel = get_score(grp[i], grp[j], scores)
+                rel = scores[grp[i]][grp[j]]
                 if rel < cutoffs['1st']:
                     unrel[grp[i]].append(grp[j])
         for par1 in unrel:
@@ -179,8 +181,8 @@ def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
                 for child in grp:
                     if child == par1 or child == par2:
                         continue
-                    rel1 = get_score(par1, child, scores)
-                    rel2 = get_score(par2, child, scores)
+                    rel1 = scores[par1][child]
+                    rel2 = scores[par2][child]
                     if rel1 < cutoffs['1st'] or rel2 < cutoffs['1st']:
                         continue
                     #if we know the gender of at least one parent assign accordingly
@@ -215,13 +217,10 @@ def parse_nuclear_groups(groups, scores, genders, x_ratios, cutoffs):
             row.append(str(genders[g]))
             row.append('-9') #affectation status unknown
             if g in children:
-                row.append("{:.3f}".format(get_score(children[g]['father'], g, 
-                                                     scores)))
-                row.append("{:.3f}".format(get_score(children[g]['mother'], g, 
-                                                     scores)))
-                row.append("{:.3f}".format(get_score(children[g]['father'], 
-                                                     children[g]['mother'], 
-                                                     scores)))
+                row.append("{:.3f}".format(scores[children[g]['father']][g]))
+                row.append("{:.3f}".format(scores[children[g]['mother']][g])) 
+                row.append("{:.3f}".format(
+                         scores[children[g]['father']][children[g]['mother']]))
             else:
                 row.extend(['NA', 'NA', 'NA'])
             row.append("{:.3f}".format(x_ratios[g]))
@@ -235,17 +234,17 @@ def pick_parents(par_dict, child, dad, mum, scores):
     score_diffs = 0 
     if par_dict['father'] != dad:
         #child to father more related == better
-        rel1 = get_score(child, par_dict['father'], scores) 
-        rel2 = get_score(child, dad, scores)
+        rel1 = scores[child][par_dict['father']] 
+        rel2 = scores[child][dad]
         score_diffs += (rel2 - rel1)
     if par_dict['mother'] != mum:
         #child to mother more related == better
-        rel1 = get_score(child, par_dict['mother'], scores) 
-        rel2 = get_score(child, mum, scores)
+        rel1 = scores[child][par_dict['mother']] 
+        rel2 = scores[child][mum]
         score_diffs += (rel2 - rel1)
     #father to mother more related == worse
-    rel1 = get_score(par_dict['father'], par_dict['mother'], scores)
-    rel2 = get_score(dad, mum, scores)
+    rel1 = scores[par_dict['father']][par_dict['mother']]
+    rel2 = scores[dad][mum]
     score_diffs += (rel1 - rel2)
     if score_diffs > 0:
         #reassign
@@ -263,7 +262,7 @@ def get_nuclear_groups(indvs, scores, cutoffs):
     nuclear_groups = []
     for i in range(0, len(indvs)):
         for j in range(i+1, len(indvs)):
-            rel = get_score(indvs[i], indvs[j], scores)
+            rel = scores[indvs[i]][indvs[j]]
             if rel > cutoffs['1st']:
                 assigned = False
                 if not nuclear_groups:
@@ -330,39 +329,113 @@ def assign_fams(scores, cutoffs):
                     indv_to_fam[indv2] = n
                     fams[n].extend([indv1, indv2])
     #mop up any singletons
-    for indv1 in scores:
-        if indv1 not in indv_to_fam:
+    for indv in scores:
+        if indv not in indv_to_fam:
             n += 1
-            indv_to_fam[indv1] = n
-            fams[n] = [indv1]
-        for indv2 in scores[indv1]:
-            if indv2 not in indv_to_fam:
-                n += 1
-                indv_to_fam[indv2] = n
-                fams[n] = [indv2]
+            indv_to_fam[indv] = n
+            fams[n] = [indv]
     return fams
     
 
 def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
     ped = PedFile(pedfile)
-    raise NotImplementedError
     #output each line of ped file with extra column indicating errors/warnings
-    # check expected relatedness for all family members
-    # check gender for all samples
-    #TODO
-    #output each undocumented familial relationship
-    #TODO
+    print(str.join("\t", ["FID", "IID", "DAD", "MUM", "SEX", "PHE", "STATUS",
+                          "CULPRITS", "SEX_ERROR", "PAR_ERROR", "SIB_ERROR", 
+                          "REL_ERROR", "MISS_1st_ORDER", "MISSING_REL"]))
+    for fid, fam in ped.families.items():
+        for iid, indv in fam.individuals.items():
+            father = indv.father if indv.father is not None else "0"
+            mother = indv.mother if indv.mother is not None else "0"
+            if iid not in scores:
+                print(str.join("\t", [indv.fid, iid, father, mother, 
+                                      str(indv.sex), str(indv.phenotype), 
+                                      "NOT_FOUND"] + ["NA"] * 7))
+                continue
+            par_errors = []
+            sib_errors = []
+            rel_errors = []
+            gender_error = "NA"
+            status = 'OK'
+            culprits = set()
+            # check gender for all samples
+            if indv.sex != genders[iid]:
+                gender_error = "gender = {} ({})".format(genders[iid],
+                                                         x_ratios[iid])
+                culprits.add("gender")
+                status  = "FAIL"
+            # check expected relatedness for all family members
+            for pc in indv.parents + indv.children:
+                rel = scores[iid][pc] 
+                if rel < cutoffs['1st']:
+                    par_errors.append("{} vs {} ({})".format(iid, pc, rel)) 
+                    status  = "FAIL"
+                    culprits.add("Parent/child relatedness")
+            if indv.father in scores and indv.mother in scores:
+                if scores[indv.father][indv.mother] >= cutoffs['1st']:
+                    par_errors.append("{} vs {} ({})".format(indv.father, 
+                                                             indv.mother, 
+                                                             rel)) 
+                    status  = "FAIL"
+                    culprits.add("Parents are first-order relatives")
+            for sib in indv.siblings:
+                rel = scores[iid][sib] 
+                if rel < cutoffs['1st']:
+                    sib_errors.append("{} vs {} ({})".format(iid, sib, rel))
+                    status  = "FAIL"
+                    culprits.add("Sibling relatedness")
+            for sib in indv.half_siblings:
+                rel = scores[iid][sib] 
+                if rel < cutoffs['1st']/2:
+                    sib_errors.append("{} vs {} ({})".format(iid, sib, rel))
+                    status  = "FAIL"
+                    culprits.add("Half-sibling relatedness")
+            #check for undocumented familial relationship
+            related = get_related(iid, scores, cutoffs['rel'])
+            nuclear = get_related(iid, scores, cutoffs['1st'])
+            related = related.difference(nuclear)
+            missing_rel = []
+            for r in sorted(related):
+                if r not in fam.individuals:
+                    missing_rel.append("{} ({})".format(r, scores[iid][r]))
+                    culprits.add("Undocumented relative")
+                    status  = "FAIL"
+            missing_nuc = []
+            for n in sorted(nuclear):
+                if (n not in indv.children and n not in indv.parents and 
+                    n not in indv.siblings and n not in indv.half_siblings):
+                    missing_nuc.append("{} ({})".format(n, scores[iid][n]))
+                    culprits.add("Undocumented 1st-order relative")
+                    status  = "FAIL"
+            row = [indv.fid, iid, father, mother, indv.sex, indv.phenotype, 
+                   status]
+            if culprits:
+                row.append(str.join("|", sorted(culprits)))
+            else:
+                row.append("NA")
+            row.append(gender_error)
+            for errs in (par_errors, sib_errors, rel_errors, missing_nuc, 
+                         missing_rel):
+                if errs:
+                    row.append(str.join("|", sorted(errs)))
+                else:
+                    row.append("NA")
+            print(str.join("\t", (str(x) for x in row)))
+    for iid in scores:
+        if iid not in ped.individuals:
+            print(str.join("\t", [iid, iid, "0", "0", "0", "0", "NOT_IN_PED"] 
+                                 + ["NA"] * 7))
+           
 
-
-def get_score(indv1, indv2, scores):
-    if indv1 in scores and indv2 in scores[indv1]: 
-        return scores[indv1][indv2]
-    elif indv2 in scores and indv1 in scores[indv2]:
-        return scores[indv2][indv1]
-    else:
-        raise RuntimeError("Could not find relatedness score for {} vs {}"
-                           .format(indv1, indv2))
-
+def get_related(indv, scores, cutoff):
+    related = set()
+    for other in scores[indv]:
+        if indv == other:
+            continue
+        if scores[indv][other] >= cutoff:
+            related.add(other)
+    return related
+        
 def get_parser():
     '''Get ArgumentParser'''
     parser = argparse.ArgumentParser(
