@@ -466,7 +466,8 @@ def get_parser():
                         help='''Input relatedness/relatedness2 file.''')
     parser.add_argument('vcf', metavar='VCF', 
                         help='''Input VCF file containing at a minimum, 
-                                genotypes on the X chromosome.''')
+                                genotypes on the X chromosome. Must be bgzip 
+                                compressed and tabix indexed.''')
     parser.add_argument('-p', '--ped', 
                         help='''PED file. If provided, relationships in this 
                                 PED file will be checked and flagged if 
