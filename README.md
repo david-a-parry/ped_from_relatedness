@@ -15,7 +15,7 @@ Alternatively, download or clone this repository and run:
 
     usage: ped_from_relatedness RELATEDNESS VCF [options]
 
-A minimum of two input files are required:
+Two input files are required:
     
     RELATEDNESS - output from vcftools --relatedness or --relatedness2 algorithm
     VCF         - a bgzip compressed and indexed VCF file containing X 
@@ -36,7 +36,7 @@ the --max_x_vars option.
 To attempt to generate a PED file indicating familial relationships from a set
 of relatedness data using default cutoffs:
 
-    ped_from_relatedness out.relatedness2 variants.vcf.gz > inferred.ped
+    ped_from_relatedness out.relatedness variants.vcf.gz > inferred.ped
 
 As above, but data are from the vcftools --relatedness2 algorithm:
 
@@ -49,7 +49,7 @@ when inferring gender:
 
 Check an existing PED file for potential errors:
 
-    ped_from_relatedness out.relatedness2 variants.vcf.gz -p test.ped > ped_check.tsv
+    ped_from_relatedness out.relatedness2 variants.vcf.gz -r2 -n 2000 -p test.ped > ped_check.tsv
 
 For detailed options see below.
 
@@ -110,28 +110,4 @@ For detailed options see below.
 ## AUTHOR
 
 Written by David A. Parry at the University of Edinburgh. 
-
-## COPYRIGHT AND LICENSE
-
-MIT License
-
-Copyright (c) 2017 David A. Parry
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 

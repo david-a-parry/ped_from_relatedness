@@ -497,9 +497,9 @@ def get_parser():
                                 is 0.8 or 0.45 if --relatedness2 flag is 
                                 set.''')
     parser.add_argument('-x', '--xx_cutoff', type=float, 
-                        help='''Custom cutoff of for ratio het variants to 
-                                total variants for assigning a sample as XX 
-                                rather than XY. Default = 0.3.''')
+                        help='''Custom cutoff for ratio het variants to total 
+                                variants for assigning a sample as XX rather 
+                                than XY. Default = 0.3.''')
     parser.add_argument('-a', '--assembly', default='hg38', 
                         help='''Assembly VCF input. Used for defining PAR 
                                 region when determining genders. 
