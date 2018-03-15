@@ -363,32 +363,50 @@ def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
                 gender_error = "gender = {} ({})".format(genders[iid],
                                                          x_ratios[iid])
                 culprits.add("gender")
-                status  = "FAIL"
+                status = "FAIL"
             # check expected relatedness for all family members
             for pc in indv.parents + indv.children:
+                if pc not in scores[iid]:
+                    par_errors.append("{} NOT_FOUND".format(pc)) 
+                    if status == 'OK':
+                        status = "WARN"
+                    culprits.add("Parent/child missing from scores.")
+                    continue
                 rel = scores[iid][pc] 
                 if rel < cutoffs['1st']:
                     par_errors.append("{} vs {} ({})".format(iid, pc, rel)) 
-                    status  = "FAIL"
+                    status = "FAIL"
                     culprits.add("Parent/child relatedness")
             if indv.father in scores and indv.mother in scores:
                 if scores[indv.father][indv.mother] >= cutoffs['1st']:
                     par_errors.append("{} vs {} ({})".format(indv.father, 
                                                              indv.mother, 
                                                              rel)) 
-                    status  = "FAIL"
+                    status = "FAIL"
                     culprits.add("Parents are first-order relatives")
             for sib in indv.siblings:
+                if sib not in scores[iid]:
+                    sib_errors.append("{} NOT_FOUND".format(sib)) 
+                    if status == 'OK':
+                        status = "WARN"
+                    culprits.add("Sibling missing from scores.")
+                    continue
                 rel = scores[iid][sib] 
                 if rel < cutoffs['1st']:
                     sib_errors.append("{} vs {} ({})".format(iid, sib, rel))
-                    status  = "FAIL"
+                    status = "FAIL"
                     culprits.add("Sibling relatedness")
             for sib in indv.half_siblings:
+                if sib not in scores[iid]:
+                    sib_errors.append("{} NOT_FOUND".format(sib)) 
+                    if status == 'OK':
+                        status = "WARN"
+                    culprits.add("Half-sibling missing from scores.")
+                    continue
                 rel = scores[iid][sib] 
                 if rel < cutoffs['1st']/2:
                     sib_errors.append("{} vs {} ({})".format(iid, sib, rel))
-                    status  = "FAIL"
+                    status = "FAIL"
                     culprits.add("Half-sibling relatedness")
             #check for undocumented familial relationship
             related = get_related(iid, scores, cutoffs['rel'])
@@ -399,14 +417,14 @@ def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
                 if r not in fam.individuals:
                     missing_rel.append("{} ({})".format(r, scores[iid][r]))
                     culprits.add("Undocumented relative")
-                    status  = "FAIL"
+                    status = "FAIL"
             missing_nuc = []
             for n in sorted(nuclear):
                 if (n not in indv.children and n not in indv.parents and 
                     n not in indv.siblings and n not in indv.half_siblings):
                     missing_nuc.append("{} ({})".format(n, scores[iid][n]))
                     culprits.add("Undocumented 1st-order relative")
-                    status  = "FAIL"
+                    status = "FAIL"
             row = [indv.fid, iid, father, mother, indv.sex, indv.phenotype, 
                    status]
             if culprits:
