@@ -457,9 +457,9 @@ def get_related(indv, scores, cutoff):
 def get_parser():
     '''Get ArgumentParser'''
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
         usage='%(prog)s RELATEDNESS VCF [options]',
-        description='Construct small pedigrees from relatedness data.',
+        description='''Construct or check small pedigrees from relatedness 
+                       data.''',
     )
 
     parser.add_argument('relatedness', metavar='RELATEDNESS', 

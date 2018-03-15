@@ -57,7 +57,7 @@ For detailed options see below.
 
     usage: ped_from_relatedness RELATEDNESS VCF [options]
 
-    Construct small pedigrees from relatedness data.
+    Construct or check small pedigrees from relatedness data.
 
     positional arguments:
       RELATEDNESS           Input relatedness/relatedness2 file.
