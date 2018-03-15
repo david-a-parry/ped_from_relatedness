@@ -3,7 +3,7 @@
 import sys
 import argparse
 from parse_vcf import VcfReader, VcfHeader, VcfRecord 
-from vase.ped_file import PedFile, Family, Individual
+from ped_from_relatedness.ped_file import PedFile, Family, Individual
 from collections import defaultdict
 
 par = {'hg38'  : (('chrX', 10001, 2781479), ('chrX', 155701383, 156030895),
