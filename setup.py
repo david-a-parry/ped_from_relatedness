@@ -15,6 +15,8 @@ setup(
     install_requires=[
           'pysam',
           'parse_vcf',
+          'sklearn',
+          'numpy',
       ],
     scripts = ["bin/ped_from_relatedness"],
     classifiers = [

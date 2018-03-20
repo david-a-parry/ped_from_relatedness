@@ -2,6 +2,8 @@
 
 import sys
 import argparse
+from sklearn.cluster import KMeans
+import numpy as np
 from parse_vcf import VcfReader, VcfHeader, VcfRecord 
 from ped_from_relatedness.ped_file import PedFile, Family, Individual
 from collections import defaultdict
@@ -19,12 +21,15 @@ non_par = {'hg38'  : ('chrX', 2781479, 155701382),
            'hg19'  : ('chrX', 2699520, 154931043), 
            'GRCh37': ('X', 2699520, 154931043)}
 
-gender_cutoff = 0.3 #min ratio of het to hom vars to consider a sample XX
+gender_cutoff = 0.3  #min ratio of het to hom vars to consider a sample XX
+                     #only used if --xx_cutoff is specified, otherwise use
+                     #KMeans
 
 def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38', 
          min_gq=20, family_cutoff=None, first_degree_cutoff=None, 
          xx_cutoff=None, dup_cutoff=None, max_x_vars=None, pass_filters=False):
     global gender_cutoff
+    do_kmeans = False
     cutoffs = dict()
     #cutoffs['par'] = 0.225 if relatedness2 else 0.35
     cutoffs['1st'] = 0.2 if relatedness2 else 0.35
@@ -38,6 +43,8 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
         cutoffs['dup'] = dup_cutoff
     if xx_cutoff:
         gender_cutoff = xx_cutoff
+    else:
+        do_kmeans = True
     scores = defaultdict(dict)
     with open(relatedness, 'rt') as infile:
         for line in infile:
@@ -49,9 +56,11 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
             scores[cols[0]][cols[1]] = float(cols[-1])
             scores[cols[1]][cols[0]] = float(cols[-1])
     scores = dict(scores) #raise KeyErrors for non-existing keys from now on
+    n_samples = len(scores.keys())
     warn_of_duplicate_samples(scores, cutoffs)
     genders,x_het_ratio = infer_gender(vcf, assembly, scores, min_gq, 
-                          max_x_vars=max_x_vars, pass_filters=pass_filters)
+                          max_x_vars=max_x_vars, pass_filters=pass_filters,
+                          do_kmeans=do_kmeans)
     if ped:
         check_ped(scores, genders, x_het_ratio, ped, cutoffs)
     else:
@@ -87,10 +96,14 @@ def construct_families(scores, genders, x_het_ratios, cutoffs):
                      .format(len(fams)))
 
 def infer_gender(f, assembly, scores, min_gq, max_x_vars=None, 
-                 pass_filters=False):
+                 pass_filters=False, do_kmeans=False):
     sys.stderr.write("Parsing VCF '{}' to infer sample genders.\n".format(f))
     vcf = VcfReader(f)
     check_samples_in_vcf(vcf, scores)
+    if len(vcf.header.samples) < 50 and do_kmeans:
+        do_kmeans = False
+        sys.stderr.write("Not using KMeans for gender inferrence as there are "
+                         + "fewer than 50 samples in VCF.\n")
     vcf.set_region(non_par[assembly][0], non_par[assembly][1], 
                    non_par[assembly][2])
     het_counts = defaultdict(int)
@@ -131,25 +144,61 @@ def infer_gender(f, assembly, scores, min_gq, max_x_vars=None,
                                                      non_par[assembly][1],
                                                      non_par[assembly][2]) + 
                            " Have you specified the correct assembly?")
-    genders = dict()
-    ratios = dict()
+    ratios = dict((x, het_counts[x]/total_counts[x]) if total_counts[x] > 0 
+                   else (x, -1) for x in total_counts )
     (males, females, unknown) = (0, 0, 0)
-    for samp in total_counts:
-        if total_counts[samp] < 1:
+    if do_kmeans:
+        genders, males, females, unknown  = kmeans_gender(ratios) 
+    else:
+        genders, males, females, unknown  = cutoff_gender(ratios)
+    sys.stderr.write("Finished gender inferrence - {:,} male, {:,} female {:,}"
+                     .format(males, females, unknown) + " unknown.\n")
+    return (genders, ratios)
+
+def cutoff_gender(ratios):
+    sys.stderr.write("Inferring gender using custom cutoff ({})\n"
+                     .format(gender_cutoff))
+    genders = dict()
+    (males, females, unknown) = (0, 0, 0)
+    for samp in ratios:
+        if ratios[samp] == -1:
             genders[samp] = 0
-            ratios[samp] = 0.0
             unknown += 1
         else:
-            ratios[samp] = het_counts[samp]/total_counts[samp]
             if ratios[samp] > gender_cutoff: #female
                 genders[samp] = 2
                 females += 1
             else:
                 genders[samp] = 1
                 males += 1
-    sys.stderr.write("Finished gender inferrence - {:,} male, {:,} female {:,}"
-                     .format(males, females, unknown) + " unknown.\n")
-    return (genders, ratios)
+    return (genders, males, females, unknown)
+
+def kmeans_gender(ratios):
+    sys.stderr.write("Inferring gender using KMeans\n")
+    genders = dict()
+    (males, females, unknown) = (0, 0, 0)
+    x = np.array([x for x in ratios.values() if x != -1])
+    km =  KMeans(n_clusters=2)
+    km.fit(x.reshape(-1, 1))
+    xy = np.argmin(km.cluster_centers_)
+    xx = np.argmax(km.cluster_centers_)
+    sys.stderr.write("XY cluster center is at {}\n".format(
+                     km.cluster_centers_[xy]))
+    sys.stderr.write("XX cluster center is at {}\n".format(
+                     km.cluster_centers_[xx]))
+    for s in ratios:
+        pred = km.predict(ratios[s])
+        if pred == xy:
+            genders[s] = 1
+            males += 1
+        elif pred == xx:
+            genders[s] = 2
+            females += 1
+        else:
+            genders[s] = 0
+            unknown += 1
+    return (genders, males, females, unknown)
+    
 
 def check_samples_in_vcf(vcf, scores): 
     sys.stderr.write("Checking samples...\n")
@@ -343,6 +392,7 @@ def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
     print(str.join("\t", ["FID", "IID", "DAD", "MUM", "SEX", "PHE", "STATUS",
                           "CULPRITS", "SEX_ERROR", "PAR_ERROR", "SIB_ERROR", 
                           "REL_ERROR", "MISS_1st_ORDER", "MISSING_REL"]))
+    status_counts = defaultdict(int)
     for fid, fam in ped.families.items():
         for iid, indv in fam.individuals.items():
             father = indv.father if indv.father is not None else "0"
@@ -439,10 +489,14 @@ def check_ped(scores, genders, x_ratios, pedfile, cutoffs):
                 else:
                     row.append("NA")
             print(str.join("\t", (str(x) for x in row)))
+            status_counts[status] += 1
     for iid in scores:
         if iid not in ped.individuals:
             print(str.join("\t", [iid, iid, "0", "0", "0", "0", "NOT_IN_PED"] 
                                  + ["NA"] * 7))
+    sys.stderr.write("Finished analysis. {:,} OK, {:,} FAILS, {:,} WARNINGS\n"
+                     .format(status_counts["OK"], status_counts["FAIL"],
+                             status_counts["WARN"]))
            
 
 def get_related(indv, scores, cutoff):
@@ -499,7 +553,10 @@ def get_parser():
     parser.add_argument('-x', '--xx_cutoff', type=float, 
                         help='''Custom cutoff for ratio het variants to total 
                                 variants for assigning a sample as XX rather 
-                                than XY. Default = 0.3.''')
+                                than XY. By default, KMeans is used to 
+                                determine genders from the ratios of X 
+                                chromosome heterozygous to homozygous variants
+                                in your samples..''')
     parser.add_argument('-a', '--assembly', default='hg38', 
                         help='''Assembly VCF input. Used for defining PAR 
                                 region when determining genders. 
