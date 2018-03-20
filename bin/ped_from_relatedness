@@ -569,7 +569,10 @@ def get_parser():
                                 than XY. By default, KMeans is used to 
                                 determine genders from the ratios of X 
                                 chromosome heterozygous to homozygous variants
-                                in your samples..''')
+                                in your samples if you have at least 50 samples
+                                in your VCF, otherwise an arbitrary cutoff of 
+                                0.3 is used. This option overrides the use of 
+                                KMeans and the default arbitrary cutoff''')
     parser.add_argument('-a', '--assembly', default='hg38', 
                         help='''Assembly VCF input. Used for defining PAR 
                                 region when determining genders. 
