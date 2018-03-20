@@ -382,7 +382,7 @@ def assign_fams(scores, cutoffs):
                         f = indv_to_fam[i1]
                         indv_to_fam[i2] = f
                         if i2 not in fams[f]:
-                            fams[n].append(i2)
+                            fams[f].append(i2)
                 else:
                     n += 1
                     indv_to_fam[indv1] = n
