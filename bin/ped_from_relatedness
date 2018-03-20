@@ -27,7 +27,8 @@ gender_cutoff = 0.3  #min ratio of het to hom vars to consider a sample XX
 
 def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38', 
          min_gq=20, family_cutoff=None, first_degree_cutoff=None, 
-         xx_cutoff=None, dup_cutoff=None, max_x_vars=None, pass_filters=False):
+         xx_cutoff=None, dup_cutoff=None, max_x_vars=None, pass_filters=False,
+         duplicates_file=None):
     global gender_cutoff
     do_kmeans = False
     cutoffs = dict()
@@ -57,7 +58,7 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
             scores[cols[1]][cols[0]] = float(cols[-1])
     scores = dict(scores) #raise KeyErrors for non-existing keys from now on
     n_samples = len(scores.keys())
-    warn_of_duplicate_samples(scores, cutoffs)
+    warn_of_duplicate_samples(scores, cutoffs, duplicates_file)
     genders,x_het_ratio = infer_gender(vcf, assembly, scores, min_gq, 
                           max_x_vars=max_x_vars, pass_filters=pass_filters,
                           do_kmeans=do_kmeans)
@@ -66,18 +67,28 @@ def main(relatedness, vcf, ped=None, relatedness2=False, assembly='hg38',
     else:
         construct_families(scores, genders, x_het_ratio, cutoffs)
 
-def warn_of_duplicate_samples(scores, cutoffs):
+def warn_of_duplicate_samples(scores, cutoffs, dupfile=None):
     dups = set()
+    if dupfile:
+        fh = open(dupfile, 'wt') 
+    pairs_done = set()
     for i1 in scores:
         for i2 in scores[i1]:
             if i1 == i2:
                 continue
+            if (i1, i2) in pairs_done or (i2, i1) in pairs_done:
+                continue
+            pairs_done.add((i1, i2))
             if scores[i1][i2] >= cutoffs['dup']:
                 dups.add(str.join(" + ", sorted((i1, i2))) + " ({})"
                          .format(scores[i1][i2]))
+                if dupfile:
+                    fh.write("{}\t{}\t{}\n".format(i1, i2, scores[i1][i2]))
+    if dupfile:
+        fh.close()
     if dups:
         sys.stderr.write("WARNING: Identified {:,} ".format(len(dups)) + 
-                         "potential duplicate samples as follows:\n\t" + 
+                         "potential duplicate sample pairs as follows:\n\t" + 
                          str.join("\n\t", sorted(dups)) + "\n")
 
 def construct_families(scores, genders, x_het_ratios, cutoffs):
@@ -550,6 +561,8 @@ def get_parser():
                                 samples as potential duplicates. Default value 
                                 is 0.8 or 0.45 if --relatedness2 flag is 
                                 set.''')
+    parser.add_argument('--duplicates_file',
+                        help='''Write any detected duplicates to this file.''')
     parser.add_argument('-x', '--xx_cutoff', type=float, 
                         help='''Custom cutoff for ratio het variants to total 
                                 variants for assigning a sample as XX rather 
