@@ -88,10 +88,17 @@ For detailed options see below.
                             Custom relatedness value cutoff to consider two
                             samples as potential duplicates. Default value is 0.8
                             or 0.45 if --relatedness2 flag is set.
+      --duplicates_file DUPLICATES_FILE
+                            Write any detected duplicates to this file.
       -x XX_CUTOFF, --xx_cutoff XX_CUTOFF
-                            Custom cutoff of for ratio het variants to total
-                            variants for assigning a sample as XX rather than XY.
-                            Default = 0.3.
+                            Custom cutoff for ratio het variants to total variants
+                            for assigning a sample as XX rather than XY. By
+                            default, KMeans is used to determine genders from the
+                            ratios of X chromosome heterozygous to homozygous
+                            variants in your samples if you have at least 50
+                            samples in your VCF, otherwise an arbitrary cutoff of
+                            0.3 is used. This option overrides the use of KMeans
+                            and the default arbitrary cutoff
       -a ASSEMBLY, --assembly ASSEMBLY
                             Assembly VCF input. Used for defining PAR region when
                             determining genders. Default=hg38.
